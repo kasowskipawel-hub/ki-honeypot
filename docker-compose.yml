@@ -12,7 +12,7 @@ services:
       - hp_data:/data
     environment:
       - LICENSE_KEY=${LICENSE_KEY}
-      - LICENSE_SERVER=${LICENSE_SERVER:-https://license.win443.io/api/license}
+      - LICENSE_SERVER=${LICENSE_SERVER:-https://license.ki-honeypot.de/api/license}
       - PORTS=443,80,8080,4443
       - SSH_PORTS=22,2222
       - REDIS_PORTS=6379
@@ -39,7 +39,7 @@ services:
       - hp_data:/data
     environment:
       - LICENSE_KEY=${LICENSE_KEY}
-      - LICENSE_SERVER=${LICENSE_SERVER:-https://license.win443.io/api/license}
+      - LICENSE_SERVER=${LICENSE_SERVER:-https://license.ki-honeypot.de/api/license}
       - EVENTS=/data/events.jsonl
       - ENRICHED=/data/enriched.jsonl
       - ENRICH_INTERVAL=3
@@ -63,7 +63,7 @@ services:
       - hp_data:/data
     environment:
       - LICENSE_KEY=${LICENSE_KEY}
-      - LICENSE_SERVER=${LICENSE_SERVER:-https://license.win443.io/api/license}
+      - LICENSE_SERVER=${LICENSE_SERVER:-https://license.ki-honeypot.de/api/license}
       - ENRICHED=/data/enriched.jsonl
       - EVENTS=/data/events.jsonl
       - DASH_PORT=9090
