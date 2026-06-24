@@ -19,7 +19,7 @@ import urllib.request
 import uuid
 
 LICENSE_SERVER = os.environ.get(
-    "LICENSE_SERVER", "https://license.win443.io/api/license"
+    "LICENSE_SERVER", "https://license.ki-honeypot.de/api/license"
 )
 LICENSE_KEY    = os.environ.get("LICENSE_KEY", "").strip()
 LICENSE_FILE   = os.environ.get("LICENSE_FILE", "/data/license.json")
