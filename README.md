@@ -199,11 +199,13 @@ All responses are structured JSON with enriched fields: source IP, country, ASN,
 
 ## ⚙️ Configuration
 
-Edit `/opt/ki-honeypot/.env`:
+Edit `/opt/ki-honeypot/.env` (Linux) or `C:\ki-honeypot\.env` (Windows):
 
 ```bash
 # Required
 LICENSE_KEY=HPOT-XXXX-XXXX-XXXX-XXXX
+
+# Dashboard password — see warning below
 DASH_PASSWORD=YourSecurePassword
 
 # AI features (highly recommended)
@@ -213,6 +215,8 @@ MISTRAL_API_KEY=your-mistral-key
 VT_API_KEY=your-virustotal-key
 FEED_API_KEY=your-api-bearer-key
 ```
+
+> ⚠️ **Password warning:** If `DASH_PASSWORD` is not set, the dashboard runs **without any authentication** — anyone who can reach port 9090 can see your captured data. The one-line installers (`install.sh` / `install.ps1`) generate a random password automatically and print it at the end. If you installed manually, always set `DASH_PASSWORD` before exposing the server.
 
 The Mistral key can also be set **live from the dashboard** (⚙ Settings → AI Provider Key → Save) without restarting.
 
