@@ -80,9 +80,11 @@ Built for:
 
 ## 🚀 Quick Install
 
-Requires a Linux VPS with a public IP (Ubuntu 22.04+ or Debian 12+).
-
 **[→ Request your free 30-day trial key](https://ki-honeypot.de/trial)** — enter your name and email, key arrives instantly.
+
+### 🐧 Linux / VPS (recommended)
+
+Requires Ubuntu 22.04+ or Debian 12+ with a public IP.
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/kasowskipawel-hub/ki-honeypot/main/install.sh \
@@ -98,11 +100,28 @@ curl -sSL https://raw.githubusercontent.com/kasowskipawel-hub/ki-honeypot/main/i
       --mistral YOUR_MISTRAL_API_KEY
 ```
 
-The installer handles everything: Docker, firewall (UFW), systemd autostart.
+Handles everything: Docker install, UFW firewall rules, systemd autostart.
 
-**Dashboard is live at `http://YOUR-SERVER-IP:9090` within 60 seconds.**
+> **Tip:** Move your own SSH daemon to a non-standard port (e.g. 22022) before installing, so port 22 is free for the honeypot.
 
-> **Tip:** Move your own SSH daemon to a non-standard port (e.g. 22022) before installing, so port 22 is available for the honeypot.
+### 🪟 Windows (Docker Desktop)
+
+Requires Windows 10/11 with [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed.
+Run **PowerShell as Administrator**:
+
+```powershell
+irm https://raw.githubusercontent.com/kasowskipawel-hub/ki-honeypot/main/install.ps1 | iex
+```
+
+Or with your key directly:
+
+```powershell
+$env:LICENSE_KEY="HPOT-XXXX-XXXX-XXXX-XXXX"; irm https://raw.githubusercontent.com/kasowskipawel-hub/ki-honeypot/main/install.ps1 | iex
+```
+
+Handles everything: Docker Desktop check/install (via winget), Windows Firewall rules, Task Scheduler autostart. Dashboard opens automatically in your browser.
+
+**Dashboard is live at `http://localhost:9090` within 60 seconds.**
 
 ---
 
