@@ -108,38 +108,31 @@ The installer handles everything: Docker, firewall (UFW), systemd autostart.
 
 ## 📊 Dashboard
 
-> **Screenshots:** Replace the placeholders below with real screenshots once the honeypot is running.
-> Upload images to `.github/assets/` and update the `src` paths.
-
 <table>
 <tr>
 <td width="50%">
 <img src="https://raw.githubusercontent.com/kasowskipawel-hub/ki-honeypot/main/.github/assets/screenshot-livefeed.png" alt="Live Feed — real-time attack stream">
-<br><sub><b>Live Feed</b> — real-time attack stream across all protocols</sub>
+<br><sub><b>Live Feed</b> — real-time event stream across all protocols</sub>
 </td>
 <td width="50%">
-<img src="https://raw.githubusercontent.com/kasowskipawel-hub/ki-honeypot/main/.github/assets/screenshot-replay.png" alt="Session Replay — keystroke-level SSH replay">
-<br><sub><b>Session Replay</b> — keystroke-level SSH &amp; Telnet replay with timing</sub>
-</td>
-</tr>
-<tr>
-<td width="50%">
-<img src="https://raw.githubusercontent.com/kasowskipawel-hub/ki-honeypot/main/.github/assets/screenshot-credentials.png" alt="Credentials — captured username/password pairs">
+<img src="https://raw.githubusercontent.com/kasowskipawel-hub/ki-honeypot/main/.github/assets/screenshot-credentials.png" alt="Credentials — captured SSH/Telnet logins">
 <br><sub><b>Credentials</b> — every captured username/password with AI session intent</sub>
 </td>
-<td width="50%">
-<img src="https://raw.githubusercontent.com/kasowskipawel-hub/ki-honeypot/main/.github/assets/screenshot-samples.png" alt="Malware Samples — AI analysis + VirusTotal">
-<br><sub><b>Malware Samples</b> — captured binaries with AI static analysis &amp; VirusTotal score</sub>
-</td>
 </tr>
 <tr>
 <td width="50%">
-<img src="https://raw.githubusercontent.com/kasowskipawel-hub/ki-honeypot/main/.github/assets/screenshot-redis-rce.png" alt="Redis RCE — full injection chain capture">
-<br><sub><b>Redis RCE</b> — full cron/SSH-key injection chain with REPL stream replay</sub>
+<img src="https://raw.githubusercontent.com/kasowskipawel-hub/ki-honeypot/main/.github/assets/screenshot-exploits.png" alt="Exploits — CVE matches with AI description">
+<br><sub><b>Exploits</b> — CVE matches with AI description and severity rating</sub>
 </td>
 <td width="50%">
 <img src="https://raw.githubusercontent.com/kasowskipawel-hub/ki-honeypot/main/.github/assets/screenshot-ai-journal.png" alt="AI Strategy Journal — real-time deception decisions">
-<br><sub><b>AI Strategy Journal</b> — live deception decision log</sub>
+<br><sub><b>AI Strategy Journal</b> — live deception decision log powered by Mistral</sub>
+</td>
+</tr>
+<tr>
+<td colspan="2">
+<img src="https://raw.githubusercontent.com/kasowskipawel-hub/ki-honeypot/main/.github/assets/screenshot-ai-briefing.png" alt="AI Briefing — hourly threat summary">
+<br><sub><b>AI Briefing</b> — hourly AI-generated threat landscape report</sub>
 </td>
 </tr>
 </table>
