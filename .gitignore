@@ -1,0 +1,9 @@
+.env
+*.pyc
+__pycache__/
+*.pem
+*.key
+/data/
+*.db
+*.bak
+dist/
