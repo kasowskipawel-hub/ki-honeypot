@@ -103,19 +103,13 @@ threading.Thread(target=_flush_loop, daemon=True).start()
 
 
 def _norm_path(p: str) -> str:
-    """Collapse near-identical paths so the cache hits across IPs/IDs."""
-    p = str(p or "")[:120]
-    p = re.sub(r"[0-9a-f]{8,}", "X", p)      # hashes/ids
-    p = re.sub(r"\d+", "N", p)               # numbers
-    return p.lower()
-
-
-def _norm_path(p: str) -> str:
-    """Collapse near-identical paths so the cache hits across IPs/IDs."""
-    import re
-    p = str(p or "")[:120]
-    p = re.sub(r"[0-9a-f]{8,}", "X", p)      # hashes/ids
-    p = re.sub(r"\d+", "N", p)               # numbers
+    """Collapse near-identical paths so the cache hits across IPs/IDs/query-strings."""
+    p = str(p or "")
+    # Strip query string — same CVE path with different ?param=value = same cache entry
+    p = p.split("?")[0].split(";")[0]
+    p = p[:120]
+    p = re.sub(r"[0-9a-f]{8,}", "X", p)      # hashes/tokens
+    p = re.sub(r"\d+", "N", p)               # version numbers, IDs
     return p.lower()
 
 

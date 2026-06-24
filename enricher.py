@@ -89,6 +89,15 @@ def extract_public_ips(ev: dict) -> list[str]:
 def enrich(ev: dict) -> dict:
     enriched = dict(ev)
 
+    # ── Split ssh_creds into top-level ssh_user/ssh_pass for live-feed display ──
+    if ev.get("service") in ("ssh", "telnet") and not enriched.get("ssh_user"):
+        creds = ev.get("ssh_creds") or []
+        if creds:
+            first = str(creds[0])
+            u, _, p = first.partition(":")
+            enriched["ssh_user"] = u or "?"
+            enriched["ssh_pass"] = p or ""
+
     # ── Active C2 pull: fetch the 2nd-stage payload the RCE chain installs ──
     # Redis/worm loaders deliver over raw /dev/tcp + rogue-master replication
     # (non-HTTP), which passive capture never grabbed. Pull it now, then fold the
@@ -252,6 +261,10 @@ def enrich(ev: dict) -> dict:
             if any(t in ft.lower() for t in ("script", "text", "php", "shell")):
                 continue  # text samples handled by analyze_dropper
             if not any(t in ft.lower() for t in ("elf", "pe32", "executable", "unknown")):
+                continue
+            # Known malware (VT hit) → skip LLM strings analysis, save tokens
+            vt_score = (enriched.get("hash_intel") or {}).get(sha, {}).get("vt_detections", 0)
+            if vt_score and vt_score > 0:
                 continue
             try:
                 with open(path, "rb") as fh:

@@ -104,7 +104,7 @@ async def handle_client(reader, writer):
 
         for _ in range(400):
             try:
-                data = await asyncio.wait_for(reader.read(4096), timeout=25)
+                data = await asyncio.wait_for(reader.read(4096), timeout=60)
             except asyncio.TimeoutError:
                 # Idle: if the miner is logged in, push a fresh job so we look
                 # like a live pool — keeps it connected and hashing for us.
@@ -163,17 +163,11 @@ async def handle_client(reader, writer):
                         extra_nonce,
                         4,  # extranonce2 size
                     ])
-                    # Low, realistic difficulty → miner finds shares fast and
-                    # commits (a 500000 diff looked fake and scared miners off).
+                    # Send difficulty but NO job yet — job comes after authorize.
+                    # Sending a job before auth confuses cpuminer/cgminer and
+                    # causes immediate disconnect before they send their wallet.
                     current_diff = 2048
                     await send("mining.set_difficulty", [current_diff])
-                    # Proactively push a first job so the miner starts immediately.
-                    await send("mining.notify", [
-                        JOB_ID(), hashlib.sha256(os.urandom(8)).hexdigest(),
-                        hashlib.sha256(b"c1").hexdigest()[:64],
-                        hashlib.sha256(b"c2").hexdigest()[:32],
-                        [], "01000000", "1c2f4e6a",
-                        hashlib.sha256(os.urandom(4)).hexdigest()[:8], True])
 
                 elif method == "mining.authorize":
                     username = params[0] if params else ""

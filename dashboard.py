@@ -75,8 +75,6 @@ class _State:
         self.lock       = threading.Lock()
         self.events     = []    # last 300 raw events
         self.ssh_creds  = []    # [{ts,ip,cc,user,pw,cmds}]
-        self.ntlm       = []    # [{ts,ip,cc,user,domain,ws,hashcat,shares,files,ransomware}] — NTLM only
-        self.smb        = []    # [{ts,ip,cc,svc,...}] — ALL SMB sessions incl. negotiate-only
         self.canary     = []    # [{ts,ip,cc,file,cmd}]
         self.exploits   = []    # [{ts,ip,cc,lure,path,cve}]
         self.cmds       = []    # [{ts,ip,cc,cmd}]  SSH shell commands
@@ -85,7 +83,7 @@ class _State:
         self.redis_recon = []   # [{ts,ip,cc,cmds}]  all non-RCE redis sessions
         self.threat_intel = []  # [{ts,ip,cc,score,technique,phase,indicators,path,rce_verify,tool,upload_magic}]
         self.ip_stats   = {}    # ip → {n,cc,last,svcs}
-        self.n_ev = self.n_ssh = self.n_telnet = self.n_ntlm = 0
+        self.n_ev = self.n_ssh = self.n_telnet = 0
         self.n_canary = self.n_exploits = self.n_samples = 0
         self.n_redis_rce = self.n_threats = 0
         self.ssh_replays = []   # SSH sessions with replay recording
@@ -109,13 +107,13 @@ class _State:
         """Zero every counter/list/dict (call with self.lock held). Keeps _pos,
         _sse_q and _cur_day so tailing + live SSE clients survive the rollover."""
         self.events.clear()
-        self.ssh_creds.clear(); self.ntlm.clear(); self.smb.clear()
+        self.ssh_creds.clear()
         self.canary.clear(); self.exploits.clear(); self.cmds.clear()
         self.samples.clear(); self.redis_rce.clear(); self.redis_recon.clear()
         self.threat_intel.clear()
         self.ssh_replays.clear(); self.stratum.clear()
         self.ip_stats.clear(); self.campaigns.clear(); self.actors.clear()
-        self.n_ev = self.n_ssh = self.n_telnet = self.n_ntlm = 0
+        self.n_ev = self.n_ssh = self.n_telnet = 0
         self.n_canary = self.n_exploits = self.n_samples = 0
         self.n_redis_rce = self.n_threats = 0
         self.n_stratum = 0
@@ -383,39 +381,6 @@ def _ingest(ev: dict):
                 })
             if len(ST.canary) > 300: ST.canary = ST.canary[:300]
 
-        # SMB — all sessions in ST.smb, only NTLM captures in ST.ntlm
-        if svc == "smb":
-            smb_entry = {
-                "ts":ts,"ip":ip,"cc":cc,"svc":"smb",
-                "user":ev.get("ntlm_user") or "",
-                "domain":ev.get("ntlm_domain") or "",
-                "ws":ev.get("ntlm_workstation") or "",
-                "hashcat":ev.get("hashcat"),
-                "shares":ev.get("shares",[]),
-                "files":ev.get("file_paths",[]),
-                "ransomware":ev.get("ransomware",False),
-            }
-            ST.smb.insert(0, smb_entry)
-            if len(ST.smb) > 300: ST.smb.pop()
-            if ev.get("hashcat") or ev.get("ntlm_user"):
-                ST.n_ntlm += 1
-                ST.ntlm.insert(0, smb_entry)
-                if len(ST.ntlm) > 300: ST.ntlm.pop()
-
-        # RDP / NTLM
-        if svc == "rdp" and (ev.get("hashcat") or ev.get("ntlm_user")):
-            ST.n_ntlm += 1
-            entry = {
-                "ts":ts,"ip":ip,"cc":cc,"svc":"rdp",
-                "user":ev.get("ntlm_user","?"),
-                "domain":ev.get("ntlm_domain","?"),
-                "ws":ev.get("ntlm_workstation","?"),
-                "hashcat":ev.get("hashcat"),
-                "shares":[],"files":[],"ransomware":False,
-            }
-            ST.ntlm.insert(0, entry)
-            if len(ST.ntlm) > 300: ST.ntlm.pop()
-
         # Canary access
         if ev.get("type") == "canary_access":
             ST.n_canary += 1
@@ -586,7 +551,6 @@ def _api_data() -> bytes:
                 "ips":       len(ST.ip_stats),
                 "ssh":       ST.n_ssh,
                 "telnet":    ST.n_telnet,
-                "ntlm":      ST.n_ntlm,
                 "canary":    ST.n_canary,
                 "exploits":  ST.n_exploits,
                 "samples":   ST.n_samples,
@@ -595,8 +559,6 @@ def _api_data() -> bytes:
                 "stratum":   ST.n_stratum,
             },
             "ssh_creds":    ST.ssh_creds[:80],
-            "ntlm":         ST.ntlm[:80],
-            "smb_sessions": ST.smb[:80],
             "canary":       ST.canary[:80],
             "exploits":     ST.exploits[:80],
             "cmds":         ST.cmds[:120],
@@ -741,8 +703,8 @@ body{background:var(--bg);color:var(--tx);font:13px/1.45 ui-monospace,Menlo,"SF 
 .cred-card:hover{background:var(--bg4)}
 .cred-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .cred-user{color:var(--cy);font-weight:700;font-size:13px}
-.cred-pw{color:var(--gn);font-weight:700;font-size:13px;background:rgba(0,255,85,.06);
-  padding:2px 8px;border-radius:3px;border:1px solid rgba(0,255,85,.2)}
+.cred-pw{color:var(--gn);font-weight:700;font-size:13px;font-family:'Courier New',Courier,monospace;
+  background:rgba(0,255,85,.06);padding:2px 8px;border-radius:3px;border:1px solid rgba(0,255,85,.2)}
 .cred-cmds{color:var(--dim);font-size:10px;margin-top:4px}
 
 /* NTLM hash cards */
@@ -872,7 +834,6 @@ body{background:var(--bg);color:var(--tx);font:13px/1.45 ui-monospace,Menlo,"SF 
   <div class="kpi or"><div class=v id=k-sa>0</div><div class=l>Samples</div></div>
   <div class="kpi rd"><div class=v id=k-rr>0</div><div class=l>Redis RCE</div></div>
   <div class="kpi gd"><div class=v id=k-ca>0</div><div class=l>Canary Trips</div></div>
-  <div class="kpi cy"><div class=v id=k-nt>0</div><div class=l>NTLM Hashes</div></div>
   <div class="kpi gd"><div class=v id=k-ht>0</div><div class=l title="Angreifer hat geleakte Honeytoken-Secrets BENUTZT">Honeytokens</div></div>
 </div>
 
@@ -889,8 +850,7 @@ body{background:var(--bg);color:var(--tx);font:13px/1.45 ui-monospace,Menlo,"SF 
   <div class="tab" data-t=threat>0-DAY INTEL<span class=badge id=bd-th style=display:none></span></div>
   <div class="tab" data-t=camps>CAMPAIGNS</div>
   <div class="tab" data-t=actors>ACTORS</div>
-  <div class="tab" data-t=smb>SMB / CANARY</div>
-  <div class="tab" data-t=hashes>NTLM HASHES<span class=badge id=bd-nt style=display:none></span></div>
+  <div class="tab" data-t=smb>CANARY</div>
 </div>
 
 <div id=content>
@@ -912,17 +872,6 @@ body{background:var(--bg);color:var(--tx);font:13px/1.45 ui-monospace,Menlo,"SF 
   </div>
 </div>
 
-<!-- NTLM HASHES -->
-<div class="tab-pane" id=t-hashes>
-  <div class=sec>
-    <div class=sech>Net-NTLMv2 Hashes (hashcat -m 5600) <span class=ct id=hash-ct></span>
-      <button class=copy-btn style="margin-left:10px" onclick=copyAllHashes()>COPY ALL</button>
-    </div>
-    <div id=hash-list></div>
-    <div class=empty id=hash-empty>No NTLM hashes captured yet.</div>
-  </div>
-</div>
-
 <!-- EXPLOITS -->
 <div class="tab-pane" id=t-exploits>
   <div class=sec>
@@ -934,14 +883,9 @@ body{background:var(--bg);color:var(--tx);font:13px/1.45 ui-monospace,Menlo,"SF 
 
 <!-- TOP IPs -->
 
-<!-- SMB / CANARY -->
+<!-- CANARY -->
 <div class="tab-pane" id=t-smb>
   <div class=sec>
-    <div class=sech>SMB Sessions <span class=ct id=smb-ct></span></div>
-    <div id=smb-list></div>
-    <div class=empty id=smb-empty>No SMB sessions yet.</div>
-  </div>
-  <div class=sec style="margin-top:16px">
     <div class=sech>Canary File Accesses <span class=ct id=can-ct></span></div>
     <div id=can-list></div>
     <div class=empty id=can-empty>No canary trips yet.</div>
@@ -1076,7 +1020,7 @@ var LANG=((navigator.language||navigator.userLanguage||"en").toLowerCase().slice
 try{document.documentElement.lang=LANG;}catch(e){}
 // [english, german] — leaf labels/buttons/empty-states only (tabs keep symbols)
 var I18N_PAIRS=[
- ["Events","Ereignisse"],["SSH Logins","SSH-Logins"],["NTLM Hashes","NTLM-Hashes"],
+ ["Events","Ereignisse"],["SSH Logins","SSH-Logins"],
  ["Canary Trips","Canary-Treffer"],["Exploits","Exploits"],["Samples","Samples"],
  ["Redis RCE","Redis-RCE"],["0-Day Hits","0-Day-Treffer"],
  ["Deception","Täuschung"],["Honeytokens","Honeytokens"],["Stratum","Stratum"],
@@ -1128,14 +1072,13 @@ function toast(msg){var t=document.getElementById("toast");t.textContent=msg;t.c
 function copyText(txt){navigator.clipboard.writeText(txt).then(()=>toast("Copied!")).catch(()=>toast("Copy failed"))}
 
 // ── KPIs ──────────────────────────────────────────────────────────────────
-var kpis={events:0,ips:0,ssh:0,ntlm:0,canary:0,exploits:0,samples:0};
+var kpis={events:0,ips:0,ssh:0,canary:0,exploits:0,samples:0};
 function updKpis(k){
   if(k.events!==undefined){kpis=Object.assign(kpis,k);
   document.getElementById("k-ev").textContent=kpis.events;
   document.getElementById("k-ip").textContent=kpis.ips;
   document.getElementById("k-ss").textContent=kpis.ssh;
   document.getElementById("k-tel").textContent=kpis.telnet||0;
-  document.getElementById("k-nt").textContent=kpis.ntlm;
   document.getElementById("k-ca").textContent=kpis.canary;
   document.getElementById("k-ex").textContent=kpis.exploits;
   document.getElementById("k-sa").textContent=kpis.samples;
@@ -1203,9 +1146,7 @@ function addLiveRow(ev){
   var cc=(ev.geo||{}).cc||"";
   var path=ev.path||ev.file||ev.url||"";
   var extra="";
-  if(ev.ssh_pass) extra='<span class=cred-pw>'+E(ev.ssh_pass)+'</span>';
-  else if(ev.hashcat) extra='<span style="color:var(--bl);font-size:10px">'+E(ev.hashcat.slice(0,60))+'…</span>';
-  else if(path) extra='<span style="color:var(--tx);font-size:11px">'+E(path.slice(0,80))+'</span>';
+  if(path) extra='<span style="color:var(--tx);font-size:11px">'+E(path.slice(0,80))+'</span>';
   var rowCls="row";
   if(type=="canary_access")rowCls+=" canary-row";
   if(ev.ransomware)rowCls+=" exploit-row";
@@ -1255,40 +1196,6 @@ function renderCreds(){
 function addCred(c){
   credList.unshift(c);if(credList.length>200)credList.pop();
   if(document.getElementById("t-creds").classList.contains("on"))renderCreds();
-}
-
-// ── NTLM Hashes ───────────────────────────────────────────────────────────
-var hashList=[];
-function renderHashes(){
-  var el=document.getElementById("hash-list"),ct=document.getElementById("hash-ct");
-  var emp=document.getElementById("hash-empty");
-  ct.textContent=hashList.length+" hashes";
-  emp.style.display=hashList.length?"none":"";
-  el.innerHTML=hashList.slice(0,80).map(function(h){
-    var ransom=h.ransomware?'class="hash-card ransom"':'class=hash-card';
-    var warn=h.ransomware?'<span class="tag tag-ransom" style="margin-left:6px">RANSOMWARE</span>':"";
-    var hv=h.hashcat||"(no hash)";
-    return '<div '+ransom+'>'+
-      '<div class=cred-row>'+
-      '<span class=ts>'+Tl(h.ts)+'</span>'+
-      '<span class=flag>'+F(h.cc)+'</span>'+
-      '<span class=ip>'+E(h.ip)+'</span>'+
-      '<span class=cred-user>'+E(h.user)+'@'+E(h.domain)+'</span>'+
-      '<span style="color:var(--dim);font-size:10px">WS:'+E(h.ws)+'</span>'+
-      warn+
-      '</div>'+
-      '<div class=hash-val onclick="copyText(\''+E(hv)+'\')" title="Click to copy">'+E(hv)+'</div>'+
-      (h.shares&&h.shares.length?'<div style="color:var(--dim);font-size:10px;margin-top:4px">Shares: '+h.shares.map(x=>E(x)).join(", ")+'</div>':"")+
-      '</div>';
-  }).join("");
-}
-function copyAllHashes(){
-  var all=hashList.filter(h=>h.hashcat).map(h=>h.hashcat).join("\n");
-  copyText(all);
-}
-function addNtlm(h){
-  hashList.unshift(h);if(hashList.length>200)hashList.pop();
-  if(document.getElementById("t-hashes").classList.contains("on"))renderHashes();
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────
@@ -1348,28 +1255,9 @@ function renderIPs(data){
   }).join("");
 }
 
-// ── SMB + Canary ──────────────────────────────────────────────────────────
-var smbList=[], canaryList=[];
+// ── Canary ────────────────────────────────────────────────────────────────
+var canaryList=[];
 function renderSMB(){
-  var el=document.getElementById("smb-list"),ct=document.getElementById("smb-ct");
-  var emp=document.getElementById("smb-empty");
-  ct.textContent=smbList.length+" sessions";
-  emp.style.display=smbList.length?"none":"";
-  el.innerHTML=smbList.slice(0,60).map(function(s){
-    var ransom=s.ransomware?'<span class="tag tag-ransom">RANSOMWARE DETECTED</span>':"";
-    var files=s.files&&s.files.length?
-      '<div style="color:var(--dim);font-size:10px;margin-top:3px">Files: '+s.files.slice(0,4).map(x=>E(x)).join(" │ ")+'</div>':"";
-    return '<div class="hash-card'+(s.ransomware?" ransom":"")+'">'+
-      '<div class=cred-row>'+
-      '<span class=ts>'+Tl(s.ts)+'</span>'+
-      '<span class=flag>'+F(s.cc)+'</span>'+
-      '<span class=ip>'+E(s.ip)+'</span>'+
-      '<span class=cred-user>'+(s.user?(E(s.user)+'@'+E(s.domain)):'<span style="color:var(--dim)">probe</span>')+'</span>'+
-      ransom+
-      '</div>'+files+
-      (s.hashcat?'<div class=hash-val onclick="copyText(\''+E(s.hashcat)+'\')" title="Click to copy hashcat">'+E(s.hashcat)+'</div>':"")
-      +'</div>';
-  }).join("");
   var cel=document.getElementById("can-list"),cct=document.getElementById("can-ct");
   var cemp=document.getElementById("can-empty");
   cct.textContent=canaryList.length+" trips";
@@ -1846,19 +1734,6 @@ function routeEvent(ev){
       if(document.getElementById("t-smb").classList.contains("on"))renderSMB();
     });
   }
-  if(svc=="smb"){
-    var h={ts,ip,cc,svc:"smb",user:ev.ntlm_user||"",domain:ev.ntlm_domain||"",
-      ws:ev.ntlm_workstation||"",hashcat:ev.hashcat,
-      shares:ev.shares||[],files:ev.file_paths||[],ransomware:ev.ransomware};
-    smbList.unshift(h);if(smbList.length>200)smbList.pop();
-    if(ev.hashcat||ev.ntlm_user){
-      hashList.unshift(h);if(hashList.length>200)hashList.pop();
-      updKpis({ntlm:kpis.ntlm+1});
-      bumpBadge("nt");
-      if(document.getElementById("t-hashes").classList.contains("on"))renderHashes();
-    }
-    if(document.getElementById("t-smb").classList.contains("on"))renderSMB();
-  }
   if(type=="canary_access"){
     canaryList.unshift({ts,ip,cc,file:ev.file||"?",cmd:ev.cmd||""});
     if(canaryList.length>200)canaryList.pop();
@@ -1952,8 +1827,8 @@ function resetCounters(){
   fetch("/api/reset",{method:"POST"}).then(function(r){
     if(r.ok){
       var f=document.getElementById("live-feed"); if(f)f.innerHTML="";
-      kpis={events:0,ips:0,ssh:0,ntlm:0,canary:0,exploits:0,samples:0};
-      [credList,hashList,smbList,canaryList,exList,cmdList,sampList,redisList,
+      kpis={events:0,ips:0,ssh:0,canary:0,exploits:0,samples:0};
+      [credList,canaryList,exList,cmdList,sampList,redisList,
        redisReconList,threatList,replayList,stratumList].forEach(function(a){a.length=0;});
       location.reload();
     } else alert("Reset fehlgeschlagen ("+r.status+")");
@@ -1989,8 +1864,6 @@ fetch("/api/data").then(r=>r.json()).then(function(d){
   });
   // Credentials
   (d.ssh_creds||[]).forEach(c=>{credList.push(c)});
-  (d.ntlm||[]).forEach(h=>hashList.push(h));
-  (d.smb_sessions||d.ntlm||[]).forEach(h=>smbList.push(h));
   (d.canary||[]).forEach(c=>canaryList.push(c));
   (d.exploits||[]).forEach(e=>exList.push(e));
   (d.cmds||[]).forEach(c=>cmdList.push(c));
@@ -2002,7 +1875,7 @@ fetch("/api/data").then(r=>r.json()).then(function(d){
   campaignList=(d.campaigns||[]);
   actorList=(d.actors||[]);
   stratumList=(d.stratum||[]);
-  renderCreds(); renderHashes(); renderCmds();
+  renderCreds(); renderCmds();
   renderExploits(); renderSMB(); renderSamples();
   renderRedis(); renderRedisRecon(); renderThreat();
   renderReplays(); renderCampaigns(); renderActors();
@@ -2462,7 +2335,6 @@ def _api_v1_stats() -> dict:
             "totals": {
                 "events":    ST.n_ev,
                 "ssh":       ST.n_ssh,
-                "ntlm":      ST.n_ntlm,
                 "exploits":  ST.n_exploits,
                 "samples":   ST.n_samples,
                 "redis_rce": ST.n_redis_rce,
@@ -2656,7 +2528,7 @@ def _build_briefing_prompt() -> str:
 
     # ── today totals + captures from ST ──
     with ST.lock:
-        n_ev, n_ssh, n_ntlm = ST.n_ev, ST.n_ssh, ST.n_ntlm
+        n_ev, n_ssh = ST.n_ev, ST.n_ssh
         n_exploit, n_samples = ST.n_exploits, ST.n_samples
         n_redis, n_stratum, n_threats = ST.n_redis_rce, ST.n_stratum, ST.n_threats
         n_camps = len(ST.campaigns)
@@ -2684,9 +2556,6 @@ def _build_briefing_prompt() -> str:
             est_creds = len(json.load(f))
     except Exception:
         est_creds = 0
-    ntlm_n = _count_lines(os.path.join(DATA, "trap_logs",
-             "ntlm_hashes_" + datetime.now(timezone.utc).strftime("%Y%m%d") + ".txt"), True)
-
     # ── AI status ──
     ki = {}
     try:
@@ -2703,7 +2572,7 @@ def _build_briefing_prompt() -> str:
         "",
         "=== TAGESZÄHLER (autoritativ) ===",
         f"events={n_ev}  ssh={n_ssh}  exploits={n_exploit}  samples={n_samples}  "
-        f"ntlm_hashes={ntlm_n}  redis_rce={n_redis}  stratum={n_stratum}  "
+        f"redis_rce={n_redis}  stratum={n_stratum}  "
         f"behavioral_threats={n_threats}  kampagnen={n_camps}",
         f"etablierte_ssh_creds(je 1/IP)={est_creds}",
         "",
