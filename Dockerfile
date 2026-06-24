@@ -1,36 +1,21 @@
-# ── Stage 1: PyArmor obfuscation ──────────────────────────────────────────────
-FROM python:3.11-slim AS obfuscate
+FROM python:3.12-slim
 
-RUN pip install --no-cache-dir "pyarmor==7.*"
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openssl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /src
-COPY *.py ./
-
-# Obfuscate all Python source files into /dist (PyArmor 7 — no license required)
-RUN mkdir /dist && pyarmor obfuscate --output /dist --exact *.py
-
-# ── Stage 2: Runtime image ─────────────────────────────────────────────────────
-FROM python:3.11-slim
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        openssl libssl-dev gcc python3-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN pip install --no-cache-dir \
-        paramiko==3.* \
-        requests==2.* \
-        cryptography==42.*
+# On-box static triage: YARA always; capa (flare-capa) best-effort (heavier).
+RUN pip install --no-cache-dir yara-python paramiko \
+ && (pip install --no-cache-dir flare-capa || echo "capa skipped")
 
 WORKDIR /app
+COPY *.py *.yar entrypoint.sh /app/
+RUN chmod +x /app/entrypoint.sh
 
-# Copy obfuscated Python files from stage 1
-COPY --from=obfuscate /dist/ ./
+ENV EVENTS=/data/events.jsonl \
+    SAMPLE_DIR=/data/samples \
+    CERT=/data/cert.pem \
+    KEY=/data/key.pem
 
-# Copy non-Python assets
-COPY entrypoint.sh ./
-RUN chmod +x entrypoint.sh
-
-# Data volume for events, samples, certs, license token
-VOLUME ["/data"]
-
-ENTRYPOINT ["./entrypoint.sh"]
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["python", "honeypot.py"]

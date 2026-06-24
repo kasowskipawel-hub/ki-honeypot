@@ -1,19 +1,19 @@
 version: "3.9"
 
-# win443-honeypot — customer deployment
-# All containers share the host network so real attacker IPs are captured.
+# win443-honeypot stack
+# net_host so the honeypot captures real client IPs (no DNAT)
 
 services:
   honeypot:
-    image: ghcr.io/kasowskipawel-hub/win443-honeypot:latest
+    build: .
+    image: win443-honeypot:latest
     container_name: win443-honeypot
     network_mode: host
     volumes:
       - hp_data:/data
     environment:
-      - LICENSE_KEY=${LICENSE_KEY}
-      - LICENSE_SERVER=${LICENSE_SERVER:-https://license.ki-honeypot.de/api/license}
       - PORTS=443,80,8080,4443
+      # SSH: 22 is honeypot after VPS sshd moved to 22022 (see deploy.py --migrate-ssh)
       - SSH_PORTS=22,2222
       - REDIS_PORTS=6379
       - SMB_PORT=445
@@ -21,8 +21,11 @@ services:
       - SAMPLE_DIR=/data/samples
       - CERT=/data/cert.pem
       - KEY=/data/key.pem
+      # AI strategist (active deception steering) needs the LLM key + persona
       - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
       - AI_STRATEGIST=${AI_STRATEGIST:-1}
+      - AI_STRATEGIST_ACTIVE=${AI_STRATEGIST_ACTIVE:-1}
+      - ADMIN_IPS=${ADMIN_IPS:-188.192.204.246,164.68.121.252,127.0.0.1,::1}
     restart: unless-stopped
     command: python honeypot.py
     logging:
@@ -32,14 +35,12 @@ services:
         max-file: "5"
 
   enricher:
-    image: ghcr.io/kasowskipawel-hub/win443-honeypot:latest
+    image: win443-honeypot:latest
     container_name: win443-enricher
     network_mode: host
     volumes:
       - hp_data:/data
     environment:
-      - LICENSE_KEY=${LICENSE_KEY}
-      - LICENSE_SERVER=${LICENSE_SERVER:-https://license.ki-honeypot.de/api/license}
       - EVENTS=/data/events.jsonl
       - ENRICHED=/data/enriched.jsonl
       - ENRICH_INTERVAL=3
@@ -56,23 +57,44 @@ services:
         max-file: "3"
 
   dashboard:
-    image: ghcr.io/kasowskipawel-hub/win443-honeypot:latest
+    image: win443-honeypot:latest
     container_name: win443-dashboard
     network_mode: host
     volumes:
       - hp_data:/data
     environment:
-      - LICENSE_KEY=${LICENSE_KEY}
-      - LICENSE_SERVER=${LICENSE_SERVER:-https://license.ki-honeypot.de/api/license}
       - ENRICHED=/data/enriched.jsonl
       - EVENTS=/data/events.jsonl
       - DASH_PORT=9090
       - DASH_PASSWORD=${DASH_PASSWORD:-honeypot2026}
+      - FEED_API_KEY=${FEED_API_KEY}
+      - SENSOR_API_KEY=${SENSOR_API_KEY}
+      - RAPIDAPI_PROXY_SECRET=${RAPIDAPI_PROXY_SECRET:-}
+      - TTP_FILE=/data/ttp_enriched.jsonl
       - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
     restart: unless-stopped
     command: python dashboard.py
     depends_on:
       - enricher
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  fake_c2:
+    image: win443-honeypot:latest
+    container_name: win443-fake-c2
+    network_mode: host
+    volumes:
+      - hp_data:/data
+    environment:
+      - EVENTS=/data/events.jsonl
+      - FAKE_C2_PORTS=7777,9999,5555,1337,31337,12345,54321
+    restart: unless-stopped
+    command: python fake_c2_server.py
+    depends_on:
+      - honeypot
     logging:
       driver: "json-file"
       options:

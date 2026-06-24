@@ -27,6 +27,101 @@ _BTC_RE  = re.compile(r'\b(bc1[a-z0-9]{39,59}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})\b
 _POOL_RE = re.compile(r'(?:stratum\+tcp|pool)[_. :]*://([a-z0-9.-]+:[0-9]+)', re.I)
 _WVAR_RE = re.compile(r'(?:WALLET|XMR_WALLET|BTC_ADDR|POOL_USER|USER)\s*[=:]\s*["\']?([0-9A-Za-z]{40,})', re.I)
 
+# ── Static bot-family signature database ──────────────────────────────────────
+# Each entry: unique byte strings that identify the family, plus metadata.
+# Ordered roughly by specificity. First match wins.
+_BOT_SIGNATURES: list[dict] = [
+    {
+        "name": "GoBot-DDoS/ujak",
+        "confidence": "high",
+        "description": "Custom Go DDoS bot (Redis-RCE dropper). Supports SYN/UDP/ACK/HTTP/TLS/Slowloris/Memcached-amp/VSE floods.",
+        "mitre": ["T1498.001", "T1498.002", "T1499.003", "T1543.002", "T1190"],
+        "indicators": [b"[stomp] done, conns=", b"[vse] done, conns=", b"heartbeat_response",
+                       b"/root/ujak/device/bot.go"],
+        "match_any": 2,  # match at least N indicators
+    },
+    {
+        "name": "Mirai",
+        "confidence": "high",
+        "description": "Mirai botnet (IoT DDoS). Targets routers/cameras via default credentials.",
+        "mitre": ["T1498.001", "T1110.001"],
+        "indicators": [b"GET /bins/", b"MIRAI", b"LZRD", b"/bin/busybox MIRAI",
+                       b"scanning..", b"[scanner]", b"nigga"],
+        "match_any": 2,
+    },
+    {
+        "name": "Gafgyt/Bashlite",
+        "confidence": "high",
+        "description": "Gafgyt/BASHLITE IoT DDoS bot. UDP/TCP/HTTP floods.",
+        "mitre": ["T1498.001", "T1110.001"],
+        "indicators": [b"GETLOCALIP", b"HTTPFLOOD", b"UDPFLOOD", b"TCPFLOOD",
+                       b"HOLD", b"JUNK", b"SCANNER"],
+        "match_any": 3,
+    },
+    {
+        "name": "XMRig-Miner",
+        "confidence": "high",
+        "description": "XMRig Monero CPU miner.",
+        "mitre": ["T1496"],
+        "indicators": [b"xmrig", b"stratum+tcp", b"donate.v2.xmrig.com",
+                       b"algo", b"cryptonight"],
+        "match_any": 2,
+    },
+    {
+        "name": "Tsunami/Kaiten",
+        "confidence": "medium",
+        "description": "Tsunami/Kaiten IRC-based DDoS bot.",
+        "mitre": ["T1498.001", "T1071.003"],
+        "indicators": [b"TSUNAMI", b"KAITEN", b"!udpflood", b"!tcpflood",
+                       b"!synflood", b"IRC"],
+        "match_any": 2,
+    },
+    {
+        "name": "RDDoS/Go-DDoS",
+        "confidence": "medium",
+        "description": "Generic Go-based DDoS bot (not ujak-specific).",
+        "mitre": ["T1498.001"],
+        "indicators": [b"main.synFlood", b"main.udpFlood", b"main.httpFlood",
+                       b"main.slowloris", b"main.ackFlood"],
+        "match_any": 3,
+    },
+    {
+        "name": "Mirai/Pastebin-C2",
+        "confidence": "high",
+        "description": "Mirai variant using Pastebin for dynamic C2 address. Supports DDoS + CREATEUSER (user creation on infected hosts). Persists via systemd/cron/rc.d.",
+        "mitre": ["T1498.001", "T1136.001", "T1543.002", "T1053.003", "T1102"],
+        "indicators": [b"[BOT-WARN]", b"[BOT-INFO]", b"[BOT-DEBUG]", b"[BOT-ERROR]",
+                       b"CREATEUSER", b"pastebin.com", b"/raw/",
+                       b"/etc/cron.daily/system-update", b"/dev/shm/.update"],
+        "match_any": 3,
+    },
+    {
+        "name": "RedisWorm/Miner",
+        "confidence": "medium",
+        "description": "Redis-propagating worm with miner payload (CONFIG SET cron injection).",
+        "mitre": ["T1190", "T1059.004", "T1496"],
+        "indicators": [b"CONFIG SET dir", b"CONFIG SET dbfilename",
+                       b"slaveof", b"SLAVEOF", b"crontab"],
+        "match_any": 2,
+    },
+]
+
+
+def _detect_bot_family(binary: bytes) -> dict | None:
+    """Match raw binary content against known bot family signatures.
+    Returns family dict (name, confidence, description, mitre, matched) or None."""
+    for sig in _BOT_SIGNATURES:
+        hits = [ind for ind in sig["indicators"] if ind in binary]
+        if len(hits) >= sig.get("match_any", 1):
+            return {
+                "name": sig["name"],
+                "confidence": sig["confidence"],
+                "description": sig["description"],
+                "mitre": sig["mitre"],
+                "matched_indicators": [h.decode("latin-1", "replace") for h in hits],
+            }
+    return None
+
 
 def fetch_c2_wallet(url: str, timeout: int = 6) -> dict:
     """Fetch C2 dropper URL, extract embedded wallet addresses and pool configs."""
@@ -97,6 +192,17 @@ def enrich(ev: dict) -> dict:
             u, _, p = first.partition(":")
             enriched["ssh_user"] = u or "?"
             enriched["ssh_pass"] = p or ""
+
+    # ── Extract dropper URL from Redis cron payload ───────────────────────
+    # Makes the download URL visible in the live feed and dashboard.
+    _cron = str(ev.get("redis_cron") or "")
+    _cmds = " ".join(str(c) for c in (ev.get("redis_commands") or []))
+    _blob = _cron + " " + _cmds
+    _dropper_re = re.compile(r'https?://[0-9]{1,3}(?:\.[0-9]{1,3}){3}(?::\d+)?/\S+')
+    _dropper_matches = _dropper_re.findall(_blob)
+    if _dropper_matches:
+        enriched["dropper_url"] = _dropper_matches[0]
+        enriched["dropper_urls"] = list(dict.fromkeys(_dropper_matches))
 
     # ── Active C2 pull: fetch the 2nd-stage payload the RCE chain installs ──
     # Redis/worm loaders deliver over raw /dev/tcp + rogue-master replication
@@ -246,6 +352,24 @@ def enrich(ev: dict) -> dict:
                             {"source": _s.get("source", ""), **ra})
                 except Exception:
                     pass
+
+        # ── Static bot-family fingerprinting (no tokens) ─────────────────
+        # Match known binary signatures against extracted strings before LLM.
+        for _s in (enriched.get("captured_samples") or []) + (enriched.get("c2_pulled_samples") or []):
+            if not isinstance(_s, dict) or not _s.get("path"):
+                continue
+            try:
+                with open(_s["path"], "rb") as _fh:
+                    _raw = _fh.read(8 * 1024 * 1024)
+                family = _detect_bot_family(_raw)
+                if family:
+                    _s["bot_family"] = family
+                    enriched.setdefault("bot_families", []).append(
+                        {"sha256": _s.get("sha256", ""), **family})
+                    print(f"[enricher] bot-family {_s.get('sha256','')[:12]}: "
+                          f"{family['name']} / {family['confidence']}", flush=True)
+            except Exception:
+                pass
 
         # ── AI binary strings analysis ────────────────────────────────────
         # ELF/PE samples: extract strings → classify via LLM. Cached by sha256.

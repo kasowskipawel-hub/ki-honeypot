@@ -688,6 +688,7 @@ body{background:var(--bg);color:var(--tx);font:13px/1.45 ui-monospace,Menlo,"SF 
 .tag-exploit{background:var(--rd2);color:var(--rd);border:1px solid rgba(255,50,80,.3)}
 .tag-sample{background:var(--or2);color:var(--or);border:1px solid rgba(255,140,60,.3)}
 .tag-stratum{background:var(--gn2);color:var(--gn);border:1px solid rgba(0,255,85,.3)}
+.tag-c2{background:#1a0a2e;color:#c084fc;border:1px solid rgba(192,132,252,.4);font-weight:700}
 .tag-ransom{background:var(--rd2);color:var(--rd);border:1px solid rgba(255,50,80,.5);animation:blink .6s step-start infinite}
 @keyframes blink{50%{opacity:0}}
 .main-text{color:var(--hi);font-size:12px;flex:1;word-break:break-all;min-width:120px}
@@ -1051,6 +1052,7 @@ function svc_tag(svc,lure){
   if(s=="ssh")return'<span class="tag tag-ssh">SSH</span>';
   if(s=="smb")return'<span class="tag tag-smb">SMB</span>';
   if(s=="redis"||lure=="redis-rce")return'<span class="tag tag-redis">Redis</span>';
+  if(s=="fake_c2"||lure=="fake-c2-listener")return'<span class="tag tag-c2">FAKE-C2</span>';
   if(s=="stratum")return'<span class="tag tag-stratum">Stratum</span>';
   if((lure||"").includes("canary")||s=="canary_access")return'<span class="tag tag-canary">CANARY</span>';
   if(s=="sample_capture")return'<span class="tag tag-sample">SAMPLE</span>';
@@ -1147,6 +1149,13 @@ function addLiveRow(ev){
   var path=ev.path||ev.file||ev.url||"";
   var extra="";
   if(path) extra='<span style="color:var(--tx);font-size:11px">'+E(path.slice(0,80))+'</span>';
+  // bot_family badge (from fake_c2 or enricher binary analysis)
+  var bf=(ev.bot_family||"");
+  if(typeof bf==="object")bf=bf.name||"";
+  if(bf)extra+=' <span style="color:var(--or);font-size:11px;font-weight:600">⚡'+E(bf)+'</span>';
+  // dropper URL from Redis cron
+  var dropper=(ev.dropper_url||"");
+  if(dropper)extra+=' <span style="color:var(--re);font-size:10px">⬇'+E(dropper.slice(0,40))+'</span>';
   var rowCls="row";
   if(type=="canary_access")rowCls+=" canary-row";
   if(ev.ransomware)rowCls+=" exploit-row";
